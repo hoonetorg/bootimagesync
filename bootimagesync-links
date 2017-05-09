@@ -1,0 +1,94 @@
+#!/bin/bash
+
+#initial vars
+CONFIGFILE="/etc/bootimagesync/bootimagesync.conf"
+
+usage(){
+  echo
+  echo "usage: `basename $0` [-c <config-file>]  [-v]"
+  echo "-c <config-file>:    config-file (default: /etc/bootimagesync/bootimagesync.conf)"
+  echo "-v:                  be more verbose"
+}
+
+main(){
+  if [ -d "${CONFIGFILE}.d" ]; then
+    for CONF in ${CONFIGFILE}.d/*;do
+      [ -f "$CONF" ] && . "$CONF"
+
+      if [ \
+           -z "$REPO_BASEPATH" -o \
+           -z "$REPODIRBASE" -o \
+           -z "$RELEASEVERFULL" -o \
+           -z "$ARCH" \
+         ]; then
+        echo "\$REPO_BASEPATH or \$REPODIRBASE or \$RELEASEVERFULL or \$ARCH is not set in configfiles - exiting"
+        exit 1
+      else
+        DST="$REPO_BASEPATH/$REPODIRBASE/$RELEASEVERFULL/$ARCH"
+        [ -d "$DST/" ] || exit 1
+      fi
+    
+      if [ -n "$LINKS" -a -n "$LINKPATHS" ];then
+        for LINKPATH in $LINKPATHS; do
+          for LINK in $LINKS;do
+            [ -L "$LINKPATH/$LINK" ] && ( unlink $LINKPATH/$LINK || exit 1 )
+            [ ! -e "$LINKPATH/$LINK" ] && ln -fs $DST/$LINK $LINKPATH/$LINK
+          done
+        done
+      fi
+    done
+  fi
+}
+
+OPTIND=1
+while getopts "h?vc:" OPT; do
+    case "$OPT" in
+    c)    CONFIGFILE=$OPTARG
+          ;;
+    v)    set -x
+          ;;
+    h|\?) usage
+          exit 0
+          ;;
+    esac
+done
+shift $((OPTIND-1))
+[ "$1" = "--" ] && shift
+
+#validation
+if [ -f "$CONFIGFILE" ]; then
+ . "$CONFIGFILE"
+else
+  echo "configfile '$CONFIGFILE' missing - exiting"
+  usage
+  exit 1
+fi
+if [ -z "$PIDDIR" ]; then
+  echo "PIDDIR '$PIDDIR' must be defined"
+  usage
+  exit 1
+fi
+if [ -z "$LOGDIR" ]; then
+  echo "LOGDIR '$LOGDIR' must be defined"
+  usage
+  exit 1
+fi
+
+[ ! -d $PIDDIR/ ] && ( mkdir -p $PIDDIR/ || exit 1 )
+PIDFILE="$PIDDIR/`basename $0`.pid"
+if [ -e "$PIDFILE" ]; then
+  PID="`cat $PIDFILE`"
+  if kill -0 $PID >/dev/null 2>&1; then
+    echo "FAILURE: `basename $0` already running  - exiting"
+    exit 1
+  else
+    rm $PIDFILE
+  fi
+fi
+echo $$ > $PIDFILE
+
+#validate rest in main(), so that it is logged to the logfile
+[ ! -d "$LOGDIR/" ] && ( mkdir -p "$LOGDIR/" || exit 1 )
+main 1>> $LOGDIR/`basename $0`.log 2>&1
+
+rm $PIDFILE

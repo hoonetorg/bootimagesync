@@ -1,0 +1,167 @@
+#!/bin/bash
+
+#initial vars
+CONFIGFILE="/etc/bootimagesync/bootimagesync.conf"
+
+usage(){
+  echo
+  echo "usage: `basename $0` [-c <config-file>]  [-v]"
+  echo "-c <config-file>:    config-file (default: /etc/bootimagesync/bootimagesync.conf)"
+  echo "-v:                  be more verbose"
+}
+
+patch(){
+  if [ -z "$1" ]; then
+    echo "PATCHDIR '$1' must be defined - exiting"
+    exit 1 
+  fi
+  PATCHDIR="$1"
+  if [ ! -d "$PATCHDIR" ]; then 
+    echo "PATCHDIR '$PATCHDIR' not a dir - exiting"
+    exit 1 
+  fi
+  cd "$PATCHDIR" || exit 1
+
+  cd images/pxeboot || exit 1
+
+  #cleanup
+  [ -d  "initrd" ] && /bin/rm -Rf initrd/ 
+  [ -f "initrd.imge" ] && /bin/rm initrd.imge
+      
+  #get cacert
+  if [ -n "$CACERTURL" ]; then
+    curl -s -k -o ./ca.pem "$CACERTURL" || exit 1
+  fi
+      
+  if [ -n "$CACERTPATH" ]; then
+    cp "$CACERTPATH" ./ca.pem || exit 1
+  fi
+      
+  #extract
+  if [ $OFFSET -gt 0 ]; then
+    #find out the offset of image is missing
+    #OFFSET="`binwalk initrd.img |grep xz |awk '{print $<correct field>}'`"
+    #example offset for Fedora 21 OFFSET=22528
+    [ -f "initrd.img" ] && dd if=initrd.img bs=$OFFSET skip=1|xz -d - >initrd.imge || exit 1
+  else
+    [ -f "initrd.img" ] && cat initrd.img|xz -d - > initrd.imge || exit 1
+  fi
+
+  #rm initrd.img
+  [ -f "initrd.img" ] && /bin/rm initrd.img 
+      
+  #uncpio
+  mkdir initrd
+  cd initrd
+  [ -f "../initrd.imge" ] && cpio --quiet -di < ../initrd.imge || exit 1
+  [ -f "../initrd.imge" ] && /bin/rm ../initrd.imge
+      
+  #patch
+  [ -f "../ca.pem" ] && cat ../ca.pem >> etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem || exit 1
+  [ -f "../ca.pem" ] && /bin/rm ../ca.pem
+      
+  #cpio
+  find ./ | cpio --quiet -H newc -o >../initrd.img
+      
+  #cleanup
+  cd ..
+  [ -d  "initrd" ] && /bin/rm -Rf initrd/ 
+      
+  xz -9 -C crc32 initrd.img
+  mv initrd.img.xz initrd.img
+}
+
+main(){
+  if [ -d "${CONFIGFILE}.d" ]; then
+    for CONF in ${CONFIGFILE}.d/*;do
+      [ -f "$CONF" ] && . "$CONF"
+
+      if [ \
+           -z "$REPO_BASEPATH" -o \
+           -z "$REPODIRBASE" -o \
+           -z "$RELEASEVERFULL" -o \
+           -z "$ARCH" \
+         ]; then
+        echo "\$REPO_BASEPATH or \$REPODIRBASE or \$RELEASEVERFULL or \$ARCH is not set in configfiles - exiting"
+        exit 1
+      else
+        DST="$REPO_BASEPATH/$REPODIRBASE/$RELEASEVERFULL/$ARCH"
+        mkdir -p "$DST/"
+        cd "$DST" || exit 1
+      fi
+
+      MYOLDPWD="$OLDPWD"
+
+      EXCLUDEALL=""
+      for EXCLUDEITEM in $EXCLUDE $EXCLUDEDIST;do
+        EXCLUDEALL="$EXCLUDEALL -X $EXCLUDEITEM"
+      done
+
+      if [ -n "$SRC" ]; then
+        lftp -e "mirror $EXCLUDEALL --delete --only-newer --verbose && exit" $SRC 2>&1
+      else
+        exit 1
+      fi
+
+      #patch ca cert into initrd.img of os
+      if [ -n "$CACERTURL" -o -n "$CACERTPATH" ]; then
+        patch "`pwd`"
+      fi
+
+      cd $MYOLDPWD
+    done
+  fi
+}
+
+OPTIND=1
+while getopts "h?vc:" OPT; do
+    case "$OPT" in
+    c)    CONFIGFILE=$OPTARG
+          ;;
+    v)    set -x
+          ;;
+    h|\?) usage
+          exit 0
+          ;;
+    esac
+done
+shift $((OPTIND-1))
+[ "$1" = "--" ] && shift
+
+#validation
+if [ -f "$CONFIGFILE" ]; then
+ . "$CONFIGFILE"
+else
+  echo "configfile '$CONFIGFILE' missing - exiting"
+  usage
+  exit 1
+fi
+if [ -z "$PIDDIR" ]; then
+  echo "PIDDIR '$PIDDIR' must be defined"
+  usage
+  exit 1
+fi
+if [ -z "$LOGDIR" ]; then
+  echo "LOGDIR '$LOGDIR' must be defined"
+  usage
+  exit 1
+fi
+
+[ ! -d $PIDDIR/ ] && ( mkdir -p $PIDDIR/ || exit 1 )
+PIDFILE="$PIDDIR/`basename $0`.pid"
+if [ -e "$PIDFILE" ]; then
+  PID="`cat $PIDFILE`"
+  if kill -0 $PID >/dev/null 2>&1; then
+    echo "FAILURE: `basename $0` already running  - exiting"
+    exit 1
+  else
+    rm $PIDFILE
+  fi
+fi
+echo $$ > $PIDFILE
+
+#validate rest in main(), so that it is logged to the logfile
+[ ! -d "$LOGDIR/" ] && ( mkdir -p "$LOGDIR/" || exit 1 )
+main 1>> $LOGDIR/`basename $0`.log 2>&1
+
+rm $PIDFILE
