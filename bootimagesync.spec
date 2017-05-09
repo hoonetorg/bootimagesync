@@ -27,21 +27,25 @@ mkdir %{buildroot}
 
 install -d -m0755 %{buildroot}/%{_bindir}/
 install -c -m0755 %{name} %{buildroot}/%{_bindir}/
+install -c -m0755 %{name}-links %{buildroot}/%{_bindir}/
 
-install -d -m0755 %{buildroot}%{_sysconfdir}/%{name}
+install -d -m0755 %{buildroot}/%{_sysconfdir}/%{name}
 install -c -m0644 %{name}.conf %{buildroot}%{_sysconfdir}/%{name}/
-install -r -m0644 %{name}.conf.d/ %{buildroot}%{_sysconfdir}/%{name}/
+install -d -m0644 %{buildroot}/%{_sysconfdir}/%{name}/%{name}.conf.d/
+install -c -m0644 %{name}.conf.d/* %{buildroot}%{_sysconfdir}/%{name}/%{name}.conf.d/
 
 %files
 %defattr(-,root,root,-)
 
 %doc COPYRIGHT LICENSE README* 
 
-%{buildroot}/%{_bindir}/%{name}
+%{_bindir}/%{name}
+%{_bindir}/%{name}-links
 
 %dir %attr(-,root,root) %{_sysconfdir}/%{name}
+%dir %attr(-,root,root) %{_sysconfdir}/%{name}/%{name}.conf.d
 %config(noreplace) %{_sysconfdir}/%{name}/%{name}.conf
-%config(noreplace) %{_sysconfdir}/%{name}/%{name}.conf.d/
+%config(noreplace) %{_sysconfdir}/%{name}/%{name}.conf.d/*
 
 #%post
 #semanage fcontext -a -t httpd_sys_rw_content_t '%{_sysconfdir}/%{name}(/.*)?' 2>/dev/null || :
