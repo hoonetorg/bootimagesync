@@ -1,5 +1,5 @@
 Name:		bootimagesync
-Version:	0.2
+Version:	0.3
 Release:	1%{?dist}
 Summary:	Bootimagesync - sync boot images for network installation of Linux 
 
@@ -34,9 +34,9 @@ install -d -m0755 %{buildroot}/%{_sysconfdir}/%{name}
 install -d -m0644 %{buildroot}/%{_sysconfdir}/%{name}/%{name}.conf.d/
 #install -c -m0644 %{name}.conf.d/* %{buildroot}%{_sysconfdir}/%{name}/%{name}.conf.d/
 
-install -d -m0644 %{buildroot}%{_docdir}/%{name}/exampleconfigdir/%{name}.conf.d/
-install -c -m0644 %{name}.conf %{buildroot}%{_docdir}/%{name}/exampleconfigdir/
-install -c -m0644 %{name}.conf.d/* %{buildroot}%{_docdir}/%{name}/exampleconfigdir/%{name}.conf.d/
+install -d -m0644 %{buildroot}%{_docdir}/%{name}-%{version}/exampleconfigdir/%{name}.conf.d/
+install -c -m0644 %{name}.conf %{buildroot}%{_docdir}/%{name}-%{version}/exampleconfigdir/
+install -c -m0644 %{name}.conf.d/* %{buildroot}%{_docdir}/%{name}-%{version}/exampleconfigdir/%{name}.conf.d/
 
 %files
 %defattr(-,root,root,-)
@@ -51,9 +51,9 @@ install -c -m0644 %{name}.conf.d/* %{buildroot}%{_docdir}/%{name}/exampleconfigd
 #%config(noreplace) %{_sysconfdir}/%{name}/%{name}.conf
 #%config(noreplace) %{_sysconfdir}/%{name}/%{name}.conf.d/*
 
-%dir %attr(-,root,root) %{_docdir}/%{name}/examples/%{name}.conf.d
-%doc %{_docdir}/%{name}/examples/%{name}.conf
-%doc %{_docdir}/%{name}/examples/%{name}.conf.d/*
+%dir %attr(-,root,root) %{_docdir}/%{name}-%{version}/exampleconfigdir/%{name}.conf.d
+%doc %{_docdir}/%{name}-%{version}/exampleconfigdir/%{name}.conf
+%doc %{_docdir}/%{name}-%{version}/exampleconfigdir/%{name}.conf.d/*
 
 #%post
 #semanage fcontext -a -t httpd_sys_rw_content_t '%{_sysconfdir}/%{name}(/.*)?' 2>/dev/null || :
