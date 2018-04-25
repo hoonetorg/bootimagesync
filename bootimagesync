@@ -10,19 +10,76 @@ usage(){
   echo "-v:                  be more verbose"
 }
 
-patch(){
-  if [ -z "$1" ]; then
-    echo "PATCHDIR '$1' must be defined - exiting"
-    exit 1 
+get_dst(){
+  if [ \
+       -z "$REPO_BASEPATH" -o \
+       -z "$REPODIRBASE" -o \
+       -z "$RELEASEVERFULL" -o \
+       -z "$ARCH" \
+     ]; then
+    logger -s "\$REPO_BASEPATH or \$REPODIRBASE or \$RELEASEVERFULL or \$ARCH is not set in configfiles - exiting"
+    return 1
+  else
+    echo "$REPO_BASEPATH/$REPODIRBASE/$RELEASEVERFULL/$ARCH"
   fi
-  PATCHDIR="$1"
-  if [ ! -d "$PATCHDIR" ]; then 
-    echo "PATCHDIR '$PATCHDIR' not a dir - exiting"
-    exit 1 
-  fi
-  cd "$PATCHDIR" || exit 1
+}
 
-  cd images/pxeboot || exit 1
+download(){
+  CONF=$1
+  [ -z "$CONF" ] && return 1
+
+  [ -f "$CONF" ] && . "$CONF" || return 1
+
+  DST="`get_dst`" || return 1
+
+  [ -z "$DST" ] && return 1
+
+  mkdir -p "$DST/"
+  cd "$DST" || return 1
+
+  if [ -f "downloaded" ]; then
+    logger -s "already downloaded to $DST - exiting"
+    return 0
+  fi
+
+  EXCLUDEALL=""
+  for EXCLUDEITEM in $EXCLUDE $EXCLUDEDIST;do
+    EXCLUDEALL="$EXCLUDEALL -X $EXCLUDEITEM"
+  done
+
+  if [ -n "$SRC" ]; then
+    logger -s "trying to download $SRC"
+    curl -o /dev/null -s -f  $SRC || return 1
+    logger -s "mirroring $SRC to $DST, excluded: \"$EXCLUDEALL\" with following command:"
+    logger -s "lftp -e \"mirror $EXCLUDEALL --delete --only-newer --verbose && exit\" $SRC 2>&1"
+    lftp -e "mirror $EXCLUDEALL --delete --only-newer --verbose && exit" $SRC 2>&1
+  else
+    return 1
+  fi
+
+  touch downloaded
+}
+
+patch(){
+  CONF=$1
+  [ -z "$CONF" ] && return 1
+
+  [ -f "$CONF" ] && . "$CONF" || return 1
+
+  [ -n "$CACERTURL" -o -n "$CACERTPATH" ] || return 1
+
+  DST="`get_dst`" || return 1
+
+  [ -d "$DST" ] || return 1
+
+  cd "$DST" || return 1
+
+  if [ -f "patched" ]; then
+    logger -s "already patched $DST - exiting"
+    return 0
+  fi
+
+  [ -d "images/pxeboot" ] && cd images/pxeboot || return 1
 
   #cleanup
   [ -d  "initrd" ] && /bin/rm -Rf initrd/ 
@@ -30,21 +87,23 @@ patch(){
       
   #get cacert
   if [ -n "$CACERTURL" ]; then
-    curl -s -k -o ./ca.pem "$CACERTURL" || exit 1
+    curl -s -k -o ./ca.pem "$CACERTURL" || return 1
   fi
       
   if [ -n "$CACERTPATH" ]; then
-    cp "$CACERTPATH" ./ca.pem || exit 1
+    cp "$CACERTPATH" ./ca.pem || return 1
   fi
-      
+
+  [ -f "./ca.pem" ] || return 1      
+
   #extract
   if [ $OFFSET -gt 0 ]; then
     #find out the offset of image is missing
     #OFFSET="`binwalk initrd.img |grep xz |awk '{print $<correct field>}'`"
     #example offset for Fedora 21 OFFSET=22528
-    [ -f "initrd.img" ] && dd if=initrd.img bs=$OFFSET skip=1|xz -d - >initrd.imge || exit 1
+    [ -f "initrd.img" ] && dd if=initrd.img bs=$OFFSET skip=1|xz -d - >initrd.imge || return 1
   else
-    [ -f "initrd.img" ] && cat initrd.img|xz -d - > initrd.imge || exit 1
+    [ -f "initrd.img" ] && cat initrd.img|xz -d - > initrd.imge || return 1
   fi
 
   #rm initrd.img
@@ -53,11 +112,11 @@ patch(){
   #uncpio
   mkdir initrd
   cd initrd
-  [ -f "../initrd.imge" ] && cpio --quiet -di < ../initrd.imge || exit 1
+  [ -f "../initrd.imge" ] && cpio --quiet -di < ../initrd.imge || return 1
   [ -f "../initrd.imge" ] && /bin/rm ../initrd.imge
       
   #patch
-  [ -f "../ca.pem" ] && cat ../ca.pem >> etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem || exit 1
+  [ -f "../ca.pem" ] && cat ../ca.pem >> etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem || return 1
   [ -f "../ca.pem" ] && /bin/rm ../ca.pem
       
   #cpio
@@ -69,47 +128,26 @@ patch(){
       
   xz -9 -C crc32 initrd.img
   mv initrd.img.xz initrd.img
+
+  cd "$DST" || return 1
+  touch patched
 }
+
 
 main(){
   if [ -d "${CONFIGFILE}.d" ]; then
-    for CONF in ${CONFIGFILE}.d/*;do
-      [ -f "$CONF" ] && . "$CONF"
 
-      if [ \
-           -z "$REPO_BASEPATH" -o \
-           -z "$REPODIRBASE" -o \
-           -z "$RELEASEVERFULL" -o \
-           -z "$ARCH" \
-         ]; then
-        echo "\$REPO_BASEPATH or \$REPODIRBASE or \$RELEASEVERFULL or \$ARCH is not set in configfiles - exiting"
-        exit 1
-      else
-        DST="$REPO_BASEPATH/$REPODIRBASE/$RELEASEVERFULL/$ARCH"
-        mkdir -p "$DST/"
-        cd "$DST" || exit 1
-      fi
+    MYOLDPWD="`pwd`"
 
-      MYOLDPWD="$OLDPWD"
-
-      EXCLUDEALL=""
-      for EXCLUDEITEM in $EXCLUDE $EXCLUDEDIST;do
-        EXCLUDEALL="$EXCLUDEALL -X $EXCLUDEITEM"
-      done
-
-      if [ -n "$SRC" ]; then
-        lftp -e "mirror $EXCLUDEALL --delete --only-newer --verbose && exit" $SRC 2>&1
-      else
-        exit 1
-      fi
+    for MYCONF in ${CONFIGFILE}.d/*;do
+      #download pxe boot images
+      download $MYCONF
 
       #patch ca cert into initrd.img of os
-      if [ -n "$CACERTURL" -o -n "$CACERTPATH" ]; then
-        patch "`pwd`"
-      fi
-
-      cd $MYOLDPWD
+      patch $MYCONF
     done
+
+    cd $MYOLDPWD
   fi
 }
 

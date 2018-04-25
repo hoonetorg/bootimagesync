@@ -10,35 +10,52 @@ usage(){
   echo "-v:                  be more verbose"
 }
 
-main(){
-  if [ -d "${CONFIGFILE}.d" ]; then
-    for CONF in ${CONFIGFILE}.d/*;do
-      [ -f "$CONF" ] && . "$CONF"
+get_dst(){
+  if [ \
+       -z "$REPO_BASEPATH" -o \
+       -z "$REPODIRBASE" -o \
+       -z "$RELEASEVERFULL" -o \
+       -z "$ARCH" \
+     ]; then
+    logger -s "\$REPO_BASEPATH or \$REPODIRBASE or \$RELEASEVERFULL or \$ARCH is not set in configfiles - exiting"
+    return 1
+  else
+    echo "$REPO_BASEPATH/$REPODIRBASE/$RELEASEVERFULL/$ARCH"
+  fi
+}
 
-      if [ \
-           -z "$REPO_BASEPATH" -o \
-           -z "$REPODIRBASE" -o \
-           -z "$RELEASEVERFULL" -o \
-           -z "$ARCH" \
-         ]; then
-        echo "\$REPO_BASEPATH or \$REPODIRBASE or \$RELEASEVERFULL or \$ARCH is not set in configfiles - exiting"
-        exit 1
-      else
-        DST="$REPO_BASEPATH/$REPODIRBASE/$RELEASEVERFULL/$ARCH"
-        [ -d "$DST/" ] || exit 1
-      fi
-    
-      if [ -n "$LINKS" -a -n "$LINKPATHS" ];then
-        for LINKPATH in $LINKPATHS; do
-          for LINK in $LINKS;do
-            [ -L "$LINKPATH/$LINK" ] && ( unlink $LINKPATH/$LINK || exit 1 )
-            [ ! -e "$LINKPATH/$LINK" ] && ln -fs $DST/$LINK $LINKPATH/$LINK
-          done
-        done
-      fi
+make_links(){
+  CONF=$1
+  [ -z "$CONF" ] && return 1
+
+  [ -f "$CONF" ] && . "$CONF" || return 1
+
+  DST="`get_dst`" || return 1
+
+  [ -z "$DST" ] && return 1
+
+  [ -d "$DST/" ] || return 1
+
+  if [ -n "$LINKS" -a -n "$LINKPATHS" ];then
+    for LINKPATH in $LINKPATHS; do
+
+      for LINK in $LINKS;do
+        [ -L "$LINKPATH/$LINK" ] && ( unlink $LINKPATH/$LINK || return 1 )
+        [ ! -e "$LINKPATH/$LINK" ] && ln -fs $DST/$LINK $LINKPATH/$LINK
+      done
     done
   fi
 }
+
+main(){
+  if [ -d "${CONFIGFILE}.d" ]; then
+    for MYCONF in ${CONFIGFILE}.d/*;do
+      #make links into yum repos
+      make_links $MYCONF
+    done
+  fi
+}
+
 
 OPTIND=1
 while getopts "h?vc:" OPT; do
